@@ -2,6 +2,8 @@
 
 Standalone C++ application for monitoring [Waveshare UPS HAT (E)](https://www.waveshare.com/wiki/UPS_HAT_(E)) and performing safe system shutdown on power loss or low battery voltage.
 
+![UPS HAT (E)](https://www.waveshare.com/w/upload/thumb/7/73/UPS-HAT-E-1.jpg/600px-UPS-HAT-E-1.jpg)
+
 ## Overview
 
 This project provides a lightweight, systemd-integrated solution for monitoring the Waveshare UPS HAT (E) expansion board on Raspberry Pi systems. It communicates with the UPS HAT via I2C and automatically shuts down the system when power is lost or battery voltage drops below safe thresholds.
