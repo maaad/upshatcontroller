@@ -17,7 +17,7 @@
 
 UpsHatMonitor::UpsHatMonitor(const UpsHatConfig& config)
     : config_(config), running_(false), on_mains_(true),
-      power_loss_time_(), low_voltage_count_(0) {
+      power_loss_time_(), last_battery_status_log_(), low_voltage_count_(0) {
     driver_ = std::make_unique<UpsHatDriver>(config_.i2c_bus, config_.i2c_addr);
 }
 
@@ -110,6 +110,36 @@ std::string UpsHatMonitor::getChargeStateName(uint8_t charge_state) {
     }
 }
 
+void UpsHatMonitor::logBatteryStatus(const ChargingStatus& charging_status,
+                                     const VbusData& vbus_data,
+                                     const BatteryData& battery_data,
+                                     const CellVoltages& cell_voltages) {
+    // Log comprehensive battery status for monitoring during battery operation
+    std::ostringstream oss;
+    oss << "Battery Status: ";
+    oss << "VBUS=" << std::fixed << std::setprecision(2) << (vbus_data.voltage_mv / 1000.0)
+        << "V " << vbus_data.current_ma << "mA, ";
+    oss << "BAT=" << (battery_data.voltage_mv / 1000.0) << "V "
+        << std::showpos << battery_data.current_ma << std::noshowpos << "mA "
+        << battery_data.percent << "%, ";
+    oss << "Cells=" << (cell_voltages.cell1_mv / 1000.0) << "V/"
+        << (cell_voltages.cell2_mv / 1000.0) << "V/"
+        << (cell_voltages.cell3_mv / 1000.0) << "V/"
+        << (cell_voltages.cell4_mv / 1000.0) << "V, ";
+    oss << "Capacity=" << battery_data.remaining_capacity_mah << "mAh, ";
+    oss << "State=" << getChargeStateName(charging_status.charge_state)
+        << " (" << static_cast<int>(charging_status.charge_state) << ")";
+
+    if (cooling_state_.has_value()) {
+        oss << ", Cooling=" << cooling_state_.value();
+    }
+    if (cpu_temp_.has_value()) {
+        oss << ", CPU=" << std::fixed << std::setprecision(1) << cpu_temp_.value() << "°C";
+    }
+
+    logMessage(LOG_INFO, oss.str());
+}
+
 bool UpsHatMonitor::checkLowVoltage(const CellVoltages& cell_voltages, int16_t current_ma) {
     // Only check low voltage when current is low (near idle) to avoid false positives
     // during high current discharge which causes voltage sag
@@ -133,7 +163,16 @@ void UpsHatMonitor::handlePowerLoss() {
     power_loss_time_ = now;
     std::ostringstream oss;
     oss << "Power loss detected. Scheduling shutdown in " << config_.shutdown_delay_sec << " sec";
-    logMessage(LOG_WARNING, oss.str());
+    std::string message = oss.str();
+    logMessage(LOG_WARNING, message);
+
+    // Send wall message to all logged-in users
+    std::ostringstream wall_cmd;
+    wall_cmd << "echo \"" << message << "\" | wall";
+    int result = system(wall_cmd.str().c_str());
+    if (result != 0) {
+        logMessage(LOG_WARNING, "Failed to send wall message");
+    }
 }
 
 void UpsHatMonitor::handlePowerRestored() {
@@ -270,6 +309,32 @@ void UpsHatMonitor::run() {
                 if (charge_changed) {
                     prev_charge_state = current_charge_state;
                 }
+            }
+
+            // Periodic status logging when on battery (every 60 seconds)
+            if (!on_mains_) {
+                auto now = std::chrono::steady_clock::now();
+                bool should_log = false;
+
+                if (last_battery_status_log_.time_since_epoch().count() == 0) {
+                    // First time on battery - log immediately
+                    last_battery_status_log_ = now;
+                    should_log = true;
+                } else {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        now - last_battery_status_log_).count();
+                    if (elapsed >= 60) {
+                        last_battery_status_log_ = now;
+                        should_log = true;
+                    }
+                }
+
+                if (should_log) {
+                    logBatteryStatus(charging_status, vbus_data, battery_data, cell_voltages);
+                }
+            } else {
+                // Reset timer when mains power is restored
+                last_battery_status_log_ = std::chrono::steady_clock::time_point();
             }
 
         } catch (const std::exception& e) {
