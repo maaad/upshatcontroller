@@ -35,6 +35,7 @@ private:
     bool running_;
     bool on_mains_;
     std::chrono::steady_clock::time_point power_loss_time_;
+    std::chrono::steady_clock::time_point last_battery_status_log_;
     int low_voltage_count_;
     std::optional<int> cooling_state_;
     std::optional<double> cpu_temp_;
@@ -53,6 +54,10 @@ private:
 
     std::string formatBriefMetrics(const VbusData& vbus_data, const BatteryData& battery_data);
     std::string getChargeStateName(uint8_t charge_state);
+    void logBatteryStatus(const ChargingStatus& charging_status,
+                         const VbusData& vbus_data,
+                         const BatteryData& battery_data,
+                         const CellVoltages& cell_voltages);
 };
 
 #endif // UPS_HAT_MONITOR_HPP
